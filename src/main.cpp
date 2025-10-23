@@ -8,7 +8,7 @@
 const char *ssid = WIFI_SSID;
 const char *password = WIFI_PASSWORD;
 
-const char *host = "10.20.60.74";
+const char *host = "10.20.60.79";
 const int port = 10000;
 
 String translateEncryptionType(wifi_auth_mode_t encryptionType)
