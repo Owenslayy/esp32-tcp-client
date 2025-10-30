@@ -1,2 +1,2 @@
-#define WIFI_SSID "ssid_wifi"
-#define WIFI_PASSWORD "mot_de_passe_wifi"
+#define WIFI_SSID "IOT-6220"
+#define WIFI_PASSWORD "6220M@cSelection"
