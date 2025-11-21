@@ -3,11 +3,15 @@
 
 #include <Arduino.h>
 #include "secrets.h"
-#include "WiFi.h"
+#include <WiFi.h>
 #include <PubSubClient.h>
 
 const char *ssid = WIFI_SSID;
 const char *password = WIFI_PASSWORD;
+
+//#define  triggerPin D5;   // change as desired
+//#define ECHO_PIN  D6;  // change as desired (use a level-shift on this pin!)
+const unsigned long MAX_ECHO_TIME_US = 30000UL; // 30ms => ~517cm (beyond sensor spec but safe)
 // MQTT Settings
 const char *mqtt_server = "maisonneuve.aws.thinger.io";  // Your broker hostname
 const int mqtt_port = 1883;
@@ -24,6 +28,23 @@ void callback(char* topic, byte* payload, unsigned int length) {
     msg += (char)payload[i];
   }
   Serial.print("Payload: "); Serial.println(msg);
+}
+void mqttCallback(char* topic, byte* payload, unsigned int length) {
+  Serial.print("MQTT msg on [");
+  Serial.print(topic);
+  Serial.print("]: ");
+  for (unsigned int i = 0; i < length; i++) Serial.write(payload[i]);
+  Serial.println();
+
+  if (String(topic) == "capter") {
+    if (length == 1 && payload[0] == '1') {
+      Serial.println("Turning LED ON");
+      digitalWrite(LED_PIN, HIGH); // set LOW to turn off
+    } else {
+      Serial.println("Turning LED OFF");
+      digitalWrite(LED_PIN, LOW); // set LOW to turn off
+    }
+  }
 }
 // Helper function to convert MQTT state codes to readable text
 const char* mqttStateToString(int8_t state) {
@@ -65,35 +86,7 @@ String translateEncryptionType(wifi_auth_mode_t encryptionType)
   return "UNKNOWN";
 }
 
-void scanNetworks()
-{
 
-  int numberOfNetworks = WiFi.scanNetworks();
-
-  // Add delay so the terminal can catch up
-  delay(3000);
-
-  Serial.print("Number of networks found: ");
-  Serial.println(numberOfNetworks);
-
-  for (int i = 0; i < numberOfNetworks; i++)
-  {
-
-    Serial.print("Network name: ");
-    Serial.println(WiFi.SSID(i));
-
-    Serial.print("Signal strength: ");
-    Serial.println(WiFi.RSSI(i));
-
-    Serial.print("MAC address: ");
-    Serial.println(WiFi.BSSIDstr(i));
-
-    Serial.print("Encryption type: ");
-    String encryptionTypeDescription = translateEncryptionType(WiFi.encryptionType(i));
-    Serial.println(encryptionTypeDescription);
-    Serial.println("-----------------------");
-  }
-}
 
 void connectToNetwork()
 {
@@ -107,18 +100,6 @@ void connectToNetwork()
 
   Serial.println("Connected to network");
 }
-
-/*void sendMessageToTCPServer() {
-  Serial.println("Send TCP message to server");
-  WiFiClient client;
-  if (!client.connect(host, port))
-  {
-    Serial.println("connection failed");
-    return;
-  }
-  client.print("My name is ESP32-Teacher");
-  client.stop();
-}*/
 
 void reconnect() {
   int retries = 0;
@@ -134,7 +115,7 @@ void reconnect() {
       // Once connected, subscribe to topics
       client.subscribe("inTopic");
       // Publish a message to show we're connected
-      client.publish("outTopic2", "ESP32 Connected!");
+     // client.publish("outTopic2", "ESP32 Connected!");
     } else {
       int state = client.state();
       Serial.print("failed, rc=");
@@ -151,11 +132,16 @@ void reconnect() {
 
 void setup() {
   Serial.begin(115200);
+  pinMode(5, OUTPUT);
+  pinMode(6, INPUT);
+  digitalWrite(5, LOW);
+  delay(100);
+  Serial.println("HC-SR04 test starting");
   Serial.println("\nStarting ESP32 MQTT Client");
   
   // Set up WiFi
   WiFi.mode(WIFI_STA);
-  scanNetworks();
+  
   connectToNetwork();
   
   Serial.print("Connected to WiFi, IP: ");
@@ -168,7 +154,27 @@ void setup() {
   // Initial connection attempt
   reconnect();
 }
+long readUltrasonic_cm() {
+  // Ensure trigger low
+  digitalWrite(5, LOW);
+  delayMicroseconds(2);
 
+  // Send 10us pulse
+  digitalWrite(5, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(5, LOW);
+
+  // Read echo pulse width (microseconds). timeout to avoid lock.
+  unsigned long duration = pulseIn(6, HIGH, MAX_ECHO_TIME_US);
+  if (duration == 0) {
+    // timeout / no echo
+    return -1;
+  }
+
+  // Convert to distance (cm): speed of sound ~343 m/s
+  long distance_cm = (long)(duration / 58.0);
+  return distance_cm;
+}
 
 void loop() {
   // Check WiFi connection first
@@ -184,14 +190,22 @@ void loop() {
   
   // Process MQTT messages and maintain connection
   client.loop();
-  
+  long dist = readUltrasonic_cm();
+char payload[64];
+if (dist < 0) {
+  snprintf(payload, sizeof(payload), "{\"distance_cm\":null,\"note\":\"pas_echo\"}");
+} else {
+  snprintf(payload, sizeof(payload), "{\"distance_cm\":%ld}", dist);
+}
+client.publish("outTopic2", payload);
+   delay(1000);
   // Optional: Publish status message every 30 seconds
   static unsigned long lastMsg = 0;
-  if (millis() - lastMsg > 30000) {
+  /*if (millis() - lastMsg > 30000) {
     lastMsg = millis();
     String status = "ESP32 Uptime: " + String(millis()/1000) + "s";
     client.publish("outTopic2", status.c_str());
-  }
+  }*/
   
   // Small delay to prevent tight looping
   delay(10);
